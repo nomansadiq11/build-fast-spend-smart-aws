@@ -1,0 +1,41 @@
+# Applied over app-baseline.yaml via `kubectl apply -f` to inject a fault.
+# The image tag does not exist, so the kubelet cannot pull it, producing a
+# steady-state ImagePullBackOff for the DevOps Agent to diagnose.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: demo
+  labels:
+    app: demo-app
+    project: build-fast-spend-smart
+    fault: image-pull-back-off
+spec:
+  replicas: 2
+  # RollingUpdate would leave the healthy old pods running forever since the
+  # new (broken) pods never pass readiness -- Recreate kills them upfront so
+  # the ImagePullBackOff fault is immediately visible on all pods.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        project: build-fast-spend-smart
+        fault: image-pull-back-off
+    spec:
+      containers:
+        - name: demo-app
+          image: __APP_IMAGE_REPO__:this-tag-does-not-exist
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "250m"
+              memory: "256Mi"

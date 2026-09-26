@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  EKS cluster + managed node group for the AWS DevOps Agent demo scenario.
+  Grants the DevOps Agent service role an AWS::EKS::AccessEntry so it can
+  diagnose OOMKilled / ImagePullBackOff faults injected via manifests/.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: build-fast-spend-smart
+
+  DevOpsAgentPrincipalArn:
+    Type: String
+    Description: IAM principal ARN for the AWS DevOps Agent service role.
+
+  KeyPairName:
+    Type: String
+    Default: ""
+
+  NodeInstanceType:
+    Type: String
+    Default: t3.medium
+
+  ClusterName:
+    Type: String
+    Default: build-fast-spend-smart-demo
+
+  KubernetesVersion:
+    Type: String
+    Default: "1.36"
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 1
+    Description: >
+      CloudWatch Logs retention for the EKS control-plane log group. CloudWatch
+      Logs has no 12-hour retention tier; 1 day is the shortest supported value.
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-vpc"
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.0.0/20
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-a"
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.16.0/20
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ClusterName}-public-b"
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "Control plane SG for ${ClusterName}"
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-cluster-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  NodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ClusterName}-node-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  # Pre-created so the control-plane log streams land here with a short
+  # retention instead of EKS auto-creating the group with no expiration.
+  ClusterLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/eks/${ClusterName}/cluster"
+      RetentionInDays: !Ref LogRetentionInDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  EksCluster:
+    Type: AWS::EKS::Cluster
+    DependsOn: ClusterLogGroup
+    Properties:
+      Name: !Ref ClusterName
+      Version: !Ref KubernetesVersion
+      RoleArn: !GetAtt ClusterRole.Arn
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        EndpointPublicAccess: true
+        EndpointPrivateAccess: false
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+            - Type: controllerManager
+            - Type: scheduler
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  # Grants the AWS DevOps Agent service role read + write access to the cluster
+  # so it can inspect *and remediate* OOMKilled / ImagePullBackOff pods
+  # (e.g. edit/rollback Deployments, delete stuck pods) injected during the demo.
+  DevOpsAgentAccessEntry:
+    Type: AWS::EKS::AccessEntry
+    Properties:
+      ClusterName: !Ref EksCluster
+      PrincipalArn: !Ref DevOpsAgentPrincipalArn
+      AccessPolicies:
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+          AccessScope:
+            Type: cluster
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EksCluster
+      NodeRole: !GetAtt NodeRole.Arn
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      CapacityType: SPOT
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      ScalingConfig:
+        MinSize: 2
+        DesiredSize: 2
+        MaxSize: 3
+      RemoteAccess: !If
+        - HasKeyPair
+        - Ec2SshKey: !Ref KeyPairName
+        - !Ref AWS::NoValue
+      Tags:
+        Project: !Ref ProjectTag
+        Ephemeral: "true"
+
+  # Holds the custom "AWS Community Day Demo" app image built by
+  # scripts/build_and_push_app.sh from app/.
+  AppRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "${ProjectTag}/demo-app"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      # Without this, stack deletion fails once an image has been pushed,
+      # since ECR normally requires a repository to be empty before deletion.
+      EmptyOnDelete: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+Outputs:
+  ClusterName:
+    Value: !Ref EksCluster
+
+  ClusterEndpoint:
+    Value: !GetAtt EksCluster.Endpoint
+
+  VpcId:
+    Value: !Ref Vpc
+
+  PublicSubnetIds:
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+
+  AppRepositoryUri:
+    Value: !GetAtt AppRepository.RepositoryUri

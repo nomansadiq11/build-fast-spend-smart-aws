@@ -1,0 +1,8 @@
+{
+  "ProjectTag": "build-fast-spend-smart",
+  "DevOpsAgentPrincipalArn": "arn:aws:iam::123456789012:role/AWSDevOpsAgentServiceRole",
+  "KeyPairName": "",
+  "NodeInstanceType": "t3.medium",
+  "OversizedInstanceType": "m5.2xlarge",
+  "LogRetentionInDays": "1"
+}

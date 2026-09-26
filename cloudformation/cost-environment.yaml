@@ -1,0 +1,134 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Deliberate FinOps cost drivers for the demo scenario: multi-AZ NAT Gateways,
+  an unattached gp3 EBS volume, and an oversized EC2 instance. The Cost
+  Anomaly Detection monitor itself lives in cost-anomaly-monitor.yaml, a
+  separate persistent stack, so it isn't reset every time this stack is torn
+  down/redeployed during testing.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: build-fast-spend-smart
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC (from eks-cluster.yaml) in which to place the cost drivers.
+
+  PublicSubnetIds:
+    Type: CommaDelimitedList
+    Description: Public subnet IDs (from eks-cluster.yaml), one NAT Gateway per subnet.
+
+  OversizedInstanceType:
+    Type: String
+    Default: m5.2xlarge
+
+  KeyPairName:
+    Type: String
+    Default: ""
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, ""]]
+
+Resources:
+  # --- Cost driver #1: one Elastic IP + NAT Gateway per AZ (multi-AZ NAT is the
+  # single biggest avoidable cost in most small workloads) ---
+  NatEipA:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  NatEipB:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: !Select [0, !Ref PublicSubnetIds]
+      Tags:
+        - Key: Name
+          Value: nat-gateway-az-a
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: !Select [1, !Ref PublicSubnetIds]
+      Tags:
+        - Key: Name
+          Value: nat-gateway-az-b
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  # --- Cost driver #2: unattached gp3 EBS volume, silently accruing storage cost ---
+  UnattachedVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Size: 100
+      VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: unattached-demo-volume
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  # --- Cost driver #3: oversized, idle EC2 instance ---
+  OversizedInstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for the deliberately oversized demo EC2 instance
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  OversizedInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref OversizedInstanceType
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      SubnetId: !Select [0, !Ref PublicSubnetIds]
+      SecurityGroupIds:
+        - !Ref OversizedInstanceSecurityGroup
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref AWS::NoValue]
+      Tags:
+        - Key: Name
+          Value: oversized-idle-instance
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+Outputs:
+  OversizedInstanceId:
+    Value: !Ref OversizedInstance
+
+  UnattachedVolumeId:
+    Value: !Ref UnattachedVolume

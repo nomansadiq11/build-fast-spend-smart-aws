@@ -1,0 +1,46 @@
+# Applied over app-baseline.yaml via `kubectl apply -f` to inject a fault.
+# Memory limit is set far below what nginx needs under load, so the kubelet
+# OOM-kills the container (Exit Code 137) shortly after it starts serving traffic.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: demo
+  labels:
+    app: demo-app
+    project: build-fast-spend-smart
+    fault: oom-killed
+spec:
+  replicas: 2
+  # Ensures all old pods are replaced up front rather than trickling through
+  # a RollingUpdate, so the OOMKilled fault is visible on every pod at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+        project: build-fast-spend-smart
+        fault: oom-killed
+    spec:
+      containers:
+        - name: demo-app
+          image: __APP_IMAGE__
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "16Mi"
+            limits:
+              cpu: "250m"
+              memory: "16Mi" # Deliberately too low -> OOMKilled (exit code 137)
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10

@@ -1,0 +1,11 @@
+cloudformation/parameters/dev.json
+cloudformation/parameters/*.json
+!cloudformation/parameters/dev.json.example
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials
+credentials.*
+.DS_Store

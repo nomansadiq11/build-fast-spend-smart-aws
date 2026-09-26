@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Master orchestration stack for "Build Fast, Spend Smart" demo.
+  Nests the EKS DevOps-agent scenario and the FinOps cost-driver scenario.
+  Deploy with `aws cloudformation package` + `deploy` (see scripts/deploy_demo.sh).
+  Note: the AWS Cost Anomaly Monitor is deployed separately (and persistently)
+  via cloudformation/cost-anomaly-monitor.yaml -- see scripts/deploy_cost_monitor.sh.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: build-fast-spend-smart
+    Description: Value applied to the Project tag on every resource.
+
+  DevOpsAgentPrincipalArn:
+    Type: String
+    Description: >
+      IAM principal ARN for the AWS DevOps Agent service role, granted an
+      AWS::EKS::AccessEntry with cluster admin view/read access.
+
+  KeyPairName:
+    Type: String
+    Default: ""
+    Description: Optional EC2 KeyPair for SSH access to demo nodes (leave blank to skip).
+
+  NodeInstanceType:
+    Type: String
+    Default: t3.medium
+    Description: EC2 instance type for the EKS managed node group.
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 1
+    Description: >
+      CloudWatch Logs retention for the EKS control-plane log group. CloudWatch
+      Logs has no 12-hour retention tier; 1 day is the shortest supported value.
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90]
+
+  OversizedInstanceType:
+    Type: String
+    Default: m5.2xlarge
+    Description: Deliberately oversized EC2 instance type used as a FinOps cost driver.
+
+Resources:
+  EksClusterStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # Local relative path: `aws cloudformation package` uploads this file and
+      # rewrites TemplateURL to the packaged S3 location (bucket + prefix aware).
+      TemplateURL: eks-cluster.yaml
+      Parameters:
+        ProjectTag: !Ref ProjectTag
+        DevOpsAgentPrincipalArn: !Ref DevOpsAgentPrincipalArn
+        KeyPairName: !Ref KeyPairName
+        NodeInstanceType: !Ref NodeInstanceType
+        LogRetentionInDays: !Ref LogRetentionInDays
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+  CostEnvironmentStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: cost-environment.yaml
+      Parameters:
+        ProjectTag: !Ref ProjectTag
+        VpcId: !GetAtt EksClusterStack.Outputs.VpcId
+        PublicSubnetIds: !GetAtt EksClusterStack.Outputs.PublicSubnetIds
+        OversizedInstanceType: !Ref OversizedInstanceType
+        KeyPairName: !Ref KeyPairName
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: Ephemeral
+          Value: "true"
+
+Outputs:
+  ClusterName:
+    Description: Name of the EKS cluster created for the DevOps Agent scenario.
+    Value: !GetAtt EksClusterStack.Outputs.ClusterName
+
+  ClusterEndpoint:
+    Description: EKS API server endpoint.
+    Value: !GetAtt EksClusterStack.Outputs.ClusterEndpoint
+
+  VpcId:
+    Description: VPC shared by both nested stacks.
+    Value: !GetAtt EksClusterStack.Outputs.VpcId
+
+  AppRepositoryUri:
+    Description: ECR repository URI for the custom demo app image.
+    Value: !GetAtt EksClusterStack.Outputs.AppRepositoryUri

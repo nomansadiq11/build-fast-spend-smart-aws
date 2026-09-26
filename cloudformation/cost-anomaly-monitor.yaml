@@ -1,0 +1,47 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Standalone, persistent AWS Cost Anomaly Detection monitor for the
+  "Build Fast, Spend Smart" project. Deployed independently of master.yaml
+  and NOT torn down between demo iterations -- Cost Anomaly Detection needs
+  ~10 days of continuous history to reliably detect anomalies, so recreating
+  it every deploy/teardown cycle resets that learning clock. This stack costs
+  nothing on its own; only the resources it watches (created by
+  cost-environment.yaml) are billed.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: build-fast-spend-smart
+
+  AnomalyAlertEmail:
+    Type: String
+    Default: ""
+    Description: Optional email address subscribed to the Cost Anomaly alert.
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AnomalyAlertEmail, ""]]
+
+Resources:
+  CostAnomalyMonitor:
+    Type: AWS::CE::AnomalyMonitor
+    Properties:
+      MonitorName: !Sub "${ProjectTag}-cost-monitor"
+      MonitorType: DIMENSIONAL
+      MonitorDimension: SERVICE
+
+  CostAnomalySubscription:
+    Type: AWS::CE::AnomalySubscription
+    Condition: HasAlertEmail
+    Properties:
+      SubscriptionName: !Sub "${ProjectTag}-anomaly-alerts"
+      Frequency: IMMEDIATE
+      MonitorArnList:
+        - !Ref CostAnomalyMonitor
+      Subscribers:
+        - Type: EMAIL
+          Address: !Ref AnomalyAlertEmail
+      Threshold: 1
+
+Outputs:
+  CostAnomalyMonitorArn:
+    Value: !Ref CostAnomalyMonitor
