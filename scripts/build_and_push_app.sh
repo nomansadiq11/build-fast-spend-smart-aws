@@ -14,6 +14,11 @@ REGION="${AWS_REGION:-us-east-1}"
 PROFILE="${AWS_PROFILE:-}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 
+if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+  echo "IMAGE_TAG must be a tag such as 'latest', not a full ECR image URI." >&2
+  exit 1
+fi
+
 PROFILE_ARGS=()
 if [[ -n "$PROFILE" ]]; then
   PROFILE_ARGS=(--profile "$PROFILE")
@@ -37,10 +42,12 @@ echo "==> Logging in to ECR registry: ${REGISTRY}"
 aws ecr get-login-password --region "$REGION" "${PROFILE_ARGS[@]}" \
   | docker login --username AWS --password-stdin "$REGISTRY"
 
-echo "==> Building image ${REPO_URI}:${IMAGE_TAG}"
-docker build -t "${REPO_URI}:${IMAGE_TAG}" app/
+if ! docker buildx inspect demo-multiarch >/dev/null 2>&1; then
+  docker buildx create --name demo-multiarch --driver docker-container
+fi
 
-echo "==> Pushing image ${REPO_URI}:${IMAGE_TAG}"
-docker push "${REPO_URI}:${IMAGE_TAG}"
+echo "==> Building and pushing AMD64/ARM64 image ${REPO_URI}:${IMAGE_TAG}"
+docker buildx build --builder demo-multiarch --platform linux/amd64,linux/arm64 \
+  -t "${REPO_URI}:${IMAGE_TAG}" --push app/
 
 echo "==> Done. Image available at: ${REPO_URI}:${IMAGE_TAG}"

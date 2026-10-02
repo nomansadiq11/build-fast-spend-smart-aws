@@ -12,6 +12,12 @@ REGION="${AWS_REGION:-us-east-1}"
 PROFILE="${AWS_PROFILE:-}"
 TEMPLATE_BUCKET="${TEMPLATE_BUCKET:?Set TEMPLATE_BUCKET to an S3 bucket (optionally s3://bucket/prefix) you own for packaging nested templates}"
 PARAM_FILE="${PARAM_FILE:-cloudformation/parameters/dev.json}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+
+if [[ ! "$IMAGE_TAG" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,127}$ ]]; then
+  echo "IMAGE_TAG must be a tag such as 'latest', not a full ECR image URI." >&2
+  exit 1
+fi
 
 # Threaded through every aws cli call below; empty when AWS_PROFILE is unset.
 PROFILE_ARGS=()
@@ -117,7 +123,6 @@ APP_REPO_URI=$(aws cloudformation describe-stacks \
   "${PROFILE_ARGS[@]}" \
   --query "Stacks[0].Outputs[?OutputKey=='AppRepositoryUri'].OutputValue" \
   --output text)
-IMAGE_TAG="${IMAGE_TAG:-latest}"
 APP_IMAGE="${APP_REPO_URI}:${IMAGE_TAG}"
 
 if command -v docker >/dev/null 2>&1; then
@@ -130,6 +135,7 @@ fi
 
 echo "==> Applying healthy baseline app to the demo namespace"
 sed -e "s#__APP_IMAGE__#${APP_IMAGE}#g" manifests/app-baseline.yaml | kubectl apply -f -
+kubectl rollout restart deployment/demo-app -n demo
 
 echo "==> Waiting for demo-app rollout"
 kubectl rollout status deployment/demo-app -n demo --timeout=180s

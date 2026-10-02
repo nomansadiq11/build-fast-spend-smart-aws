@@ -3,7 +3,8 @@
 Scripted natural-language prompts for the live demo against the `demo` namespace
 on the EKS cluster created by `cloudformation/eks-cluster.yaml`. Run
 `scripts/trigger_fault.sh oom` or `scripts/trigger_fault.sh bad-image` first,
-then ask the agent one of the prompts below.
+then ask the agent one of the prompts below. Native EKS access is read-only;
+the operator applies the fix and the agent verifies it.
 
 ## 1. Initial triage
 
@@ -26,8 +27,9 @@ then ask the agent one of the prompts below.
 
 ## 4. Remediation & verification
 
-> "Roll `demo-app` back to the last known-good configuration and confirm all
-> pods reach `Running` with 0 restarts."
+> "Give me the exact steps to restore `demo-app` to its last known-good
+> configuration. I will apply them; then check that all desired pods are
+> ready and explain any remaining restarts or errors."
 
 > "Summarize the incident timeline: what broke, what fixed it, and what
 > guardrail would prevent it from happening again."

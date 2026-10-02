@@ -229,16 +229,13 @@ Resources:
         - Key: Ephemeral
           Value: "true"
 
-  # Grants the AWS DevOps Agent service role read + write access to the cluster
-  # so it can inspect *and remediate* OOMKilled / ImagePullBackOff pods
-  # (e.g. edit/rollback Deployments, delete stuck pods) injected during the demo.
   DevOpsAgentAccessEntry:
     Type: AWS::EKS::AccessEntry
     Properties:
       ClusterName: !Ref EksCluster
       PrincipalArn: !Ref DevOpsAgentPrincipalArn
       AccessPolicies:
-        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy
+        - PolicyArn: arn:aws:eks::aws:cluster-access-policy/AmazonAIOpsAssistantPolicy
           AccessScope:
             Type: cluster
 

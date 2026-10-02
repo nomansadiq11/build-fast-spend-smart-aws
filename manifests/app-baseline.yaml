@@ -27,6 +27,7 @@ spec:
       containers:
         - name: demo-app
           image: __APP_IMAGE__
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           resources:

@@ -15,8 +15,8 @@ Parameters:
   DevOpsAgentPrincipalArn:
     Type: String
     Description: >
-      IAM principal ARN for the AWS DevOps Agent service role, granted an
-      AWS::EKS::AccessEntry with cluster admin view/read access.
+      IAM principal ARN for the AWS DevOps Agent role, granted read-only
+      EKS access for investigation via an AWS::EKS::AccessEntry.
 
   KeyPairName:
     Type: String
